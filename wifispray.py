@@ -1,11 +1,15 @@
 import argparse
+import threading
+import time
+import os
+import io
+import sys
+from colorama import Fore, Style
 from wpa_supplicant.core import WpaSupplicantDriver, InterfaceExists
 from twisted.internet.selectreactor import SelectReactor
 from txdbus.error import IntrospectionFailed
-import threading
-import time
-import sys
 import nmcli
+
 
 
 class NetworkManager:
@@ -26,7 +30,7 @@ class ScanAccessPoints:
         self.interface_name = interface_name
 
     def print_message_and_exit(self, message):
-        print(message + ", exiting...")
+        print(Fore.RED + message + ", exiting..." + Style.RESET_ALL)
         sys.exit()
 
     def start_reactor(self):
@@ -83,32 +87,58 @@ class ScanAccessPoints:
             self.print_message_and_exit("Could not scan access points")
 
     def scan(self):
-        print("Scanning access points...")
         self.start_reactor()
         self.start_driver()
         self.connect_supplicant()
         self.get_interface()
         self.scan_access_points()
         self.stop_reactor()
+        print(f"{Fore.YELLOW}Scanning access points...{Style.RESET_ALL}")
 
-    def login(self, lock, network_manager: NetworkManager, ssid, password):
+    def login(self, lock, network_manager: NetworkManager, ssid, password, wait):
         try:
-            print(f"Trying to connect to {ssid}")
+            print(
+                f"{Fore.YELLOW}Trying to connect {ssid} using {password}{Style.RESET_ALL}"
+            )
             if lock:
                 with lock:
                     network_manager.connect(ssid, password)
             else:
                 network_manager.connect(ssid, password)
             self.successful_logins.append({ssid: password})
-            print(f"Successfully connected to {ssid}:{password}")
+            print(
+                f"{Fore.GREEN}Successfully connected to {ssid} : {password}{Style.RESET_ALL}"
+            )
         except Exception:
-            print(f"Could not connect to {ssid}")
+            if not wait:
+                print(f"{Fore.RED}Could not connect to {ssid}{Style.RESET_ALL}")
+            else:
+                pass
+
+
+def read_word(file):
+    file.seek(0, io.SEEK_END)
+    file_size = file.tell()
+    file.seek(0, io.SEEK_SET)
+
+    word = ""
+
+    while True:
+        word += file.read(1)
+        if "\n" in word or file.tell() == file_size:
+            value = word.strip()
+            word = ""
+            yield value
 
 
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-p", "--password", dest="password", required=True, help="Password for spray"
+        "-p",
+        "--password",
+        dest="password",
+        required=True,
+        help="Single Password or Wordlist for spray",
     )
     parser.add_argument(
         "-i", "--interface", dest="interface", required=True, help="Interface name"
@@ -126,8 +156,53 @@ def get_arguments():
     return args
 
 
+def check_login(
+    access_points, login_function, thread_lock, network_manager, password, wait
+):
+    for ssid in access_points.values():
+        thread = threading.Thread(
+            target=login_function,
+            kwargs={
+                "lock": thread_lock,
+                "network_manager": network_manager,
+                "ssid": ssid,
+                "password": password,
+                "wait": wait,
+            },
+        )
+        thread.daemon = True
+        thread.start()
+
+    if thread_lock:
+        for thread in threading.enumerate():
+            if thread != threading.current_thread():
+                thread.join()
+    else:
+        print(
+            Fore.BLUE
+            + "You will not see successful login results,"
+            + " but your system should automatically"
+            + " connect if there was any successful login"
+            + Style.RESET_ALL
+        )
+
+
+def print_valid_credentials(scanner):
+    if scanner.successful_logins:
+        print(f"\n{Fore.BLUE}Valid credentials{Style.RESET_ALL}")
+
+        for access_point in scanner.successful_logins:
+            ssid = list(access_point.keys())[0]
+            password = list(access_point.values())[0]
+            print(f"{Fore.BLUE}{ssid} : {password}{Style.RESET_ALL}")
+
+        print()
+        scanner.successful_logins = []
+
+
 if __name__ == "__main__":
     arguments = get_arguments()
+    is_password_list = True if os.path.exists(arguments.password) else False
     wait_for_results = True if arguments.wait else False
     interface_name = arguments.interface
     scanner = ScanAccessPoints(interface_name)
@@ -136,33 +211,37 @@ if __name__ == "__main__":
     network_manager = NMCli()
     lock = threading.Lock() if wait_for_results else False
 
-    for ssid in access_points.values():
-        thread = threading.Thread(
-            target=scanner.login,
-            kwargs={
-                "lock": lock,
-                "network_manager": network_manager,
-                "ssid": ssid,
-                "password": arguments.password,
-            },
-        )
-        thread.daemon = True
-        thread.start()
+    if is_password_list:
+        wait_for_results = True
+        lock = threading.Lock()
+        file = open(arguments.password, "r")
+        read_word_generator = read_word(file)
+        password = ""
 
-    if lock:
-        for thread in threading.enumerate():
-            if thread != threading.current_thread():
-                thread.join()
+        while True:
+            password = next(read_word_generator)
+            check_login(
+                access_points,
+                scanner.login,
+                lock,
+                network_manager,
+                password,
+                wait_for_results,
+            )
+            print_valid_credentials(scanner)
+            time.sleep(5)
 
-        print()
-        print("Valid credentials")
-        for access_point in scanner.successful_logins:
-            ssid = list(access_point.keys())[0]
-            password = list(access_point.values())[0]
-            print(f"{ssid} : {password}")
+            if not password:
+                break
+
+        file.close()
     else:
-        print(
-            "You will not see successful login results,"
-            + " but your system should automatically"
-            + " connect if there was any successful login"
+        check_login(
+            access_points,
+            scanner.login,
+            lock,
+            network_manager,
+            arguments.password,
+            wait_for_results,
         )
+        print_valid_credentials(scanner)
