@@ -11,7 +11,6 @@ from txdbus.error import IntrospectionFailed
 import nmcli
 
 
-
 class NetworkManager:
     def connect(self, ssid, password):
         pass
@@ -69,9 +68,13 @@ class ScanAccessPoints:
 
     def get_interface(self):
         try:
-            self.interface = self.supplicant.create_interface(self.interface_name)
+            self.interface = self.supplicant.create_interface(
+                self.interface_name
+            )
         except InterfaceExists:
-            self.interface = self.supplicant.get_interface(self.interface_name)
+            self.interface = self.supplicant.get_interface(
+                self.interface_name
+            )
         except Exception:
             self.print_message_and_exit("Could not get interface")
 
@@ -95,10 +98,13 @@ class ScanAccessPoints:
         self.stop_reactor()
         print(f"{Fore.YELLOW}Scanning access points...{Style.RESET_ALL}")
 
-    def login(self, lock, network_manager: NetworkManager, ssid, password, wait):
+    def login(
+        self, lock, network_manager: NetworkManager, ssid, password, wait
+    ):
         try:
             print(
-                f"{Fore.YELLOW}Trying to connect {ssid} using {password}{Style.RESET_ALL}"
+                f"{Fore.YELLOW}Trying to connect {ssid} using"
+                + " {password}{Style.RESET_ALL}"
             )
             if lock:
                 with lock:
@@ -107,11 +113,14 @@ class ScanAccessPoints:
                 network_manager.connect(ssid, password)
             self.successful_logins.append({ssid: password})
             print(
-                f"{Fore.GREEN}Successfully connected to {ssid} : {password}{Style.RESET_ALL}"
+                f"{Fore.GREEN}Successfully connected"
+                + " to {ssid} : {password}{Style.RESET_ALL}"
             )
         except Exception:
             if not wait:
-                print(f"{Fore.RED}Could not connect to {ssid}{Style.RESET_ALL}")
+                print(
+                    f"{Fore.RED}Could not connect to {ssid}{Style.RESET_ALL}"
+                )
             else:
                 pass
 
@@ -141,7 +150,11 @@ def get_arguments():
         help="Single Password or Wordlist for spray",
     )
     parser.add_argument(
-        "-i", "--interface", dest="interface", required=True, help="Interface name"
+        "-i",
+        "--interface",
+        dest="interface",
+        required=True,
+        help="Interface name",
     )
     parser.add_argument(
         "-w",
@@ -157,7 +170,12 @@ def get_arguments():
 
 
 def check_login(
-    access_points, login_function, thread_lock, network_manager, password, wait
+    access_points,
+    login_function,
+    thread_lock,
+    network_manager,
+    password,
+    wait,
 ):
     for ssid in access_points.values():
         thread = threading.Thread(
