@@ -1,5 +1,5 @@
 # wifispray
-A simple tool for wifi password spraying. (Tester on Fedora 39).
+A simple tool for wifi password spraying. (Tested on Fedora 39).
 
 <br/>
 
