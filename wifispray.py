@@ -104,7 +104,7 @@ class ScanAccessPoints:
         try:
             print(
                 f"{Fore.YELLOW}Trying to connect {ssid} using"
-                + " {password}{Style.RESET_ALL}"
+                + f" {password}{Style.RESET_ALL}"
             )
             if lock:
                 with lock:
@@ -114,7 +114,7 @@ class ScanAccessPoints:
             self.successful_logins.append({ssid: password})
             print(
                 f"{Fore.GREEN}Successfully connected"
-                + " to {ssid} : {password}{Style.RESET_ALL}"
+                + f" to {ssid} : {password}{Style.RESET_ALL}"
             )
         except Exception:
             if not wait:
